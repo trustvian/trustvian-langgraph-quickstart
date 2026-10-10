@@ -1,0 +1,3 @@
+# The tests (tests/): no model, no Trustvian, no network beyond loopback.
+-r requirements.txt
+pytest>=8

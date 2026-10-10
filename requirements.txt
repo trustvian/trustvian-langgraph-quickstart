@@ -1,0 +1,16 @@
+# The agent
+langgraph>=1.2
+langchain-core>=1.6
+# The model clients graph.py chooses between: Ollama by default, any
+# OpenAI-compatible endpoint (vLLM, OpenAI, Ollama's /v1) with LLM_BASE_URL.
+langchain-ollama>=1.1
+langchain-openai>=1.7
+requests>=2.32
+
+# Instrumentation the harness (run.py) turns on. The agent itself imports none of it.
+opentelemetry-sdk>=1.45
+opentelemetry-exporter-otlp-proto-http>=1.45
+opentelemetry-instrumentation-requests>=0.66b1
+# LangGraph runs on LangChain's callbacks: this one instrumentor records the
+# graph, its nodes, every model call and every tool call.
+openinference-instrumentation-langchain>=0.1.79
