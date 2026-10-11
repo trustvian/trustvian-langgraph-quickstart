@@ -7,6 +7,9 @@ Run under Trustvian (traced):     trustvian dev --instrumentation existing \
 GRAPH_VARIANT=candidate adds the export_customer tool and asks for an export —
 the behavioral change the quick start exists to catch.
 
+With LIVE_ROLE set (live.py sets it), the graph works that role's tickets
+instead, one every few seconds until stopped; see roles.py.
+
 The graph is spelled out rather than taken from a prebuilt agent, because the
 graph is what LangGraph is for:
 
@@ -24,7 +27,8 @@ from langgraph.errors import GraphRecursionError
 from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from tools import tools_for
+import roles
+from tools import CALLS, tools_for, tools_named
 
 VARIANT = os.environ.get("GRAPH_VARIANT", "reference")
 
@@ -106,6 +110,28 @@ def run(model, variant: str, tickets=TICKETS) -> None:
         print(result["messages"][-1].content)
 
 
+def live_handler(model):
+    """Live mode's handle(ticket): the same graph, built once per tool set."""
+    graphs = {}
+
+    def handle(ticket: dict) -> None:
+        key = tuple(ticket["tools"])
+        if key not in graphs:
+            graphs[key] = build_graph(model, tools_named(ticket["tools"]))
+        messages = [SystemMessage(ticket["system"]), HumanMessage(ticket["task"])]
+        graphs[key].invoke({"messages": messages}, {"recursion_limit": RECURSION_LIMIT})
+
+    return handle
+
+
+def live(model) -> None:
+    """Live mode: LIVE_ROLE's tickets, one every few seconds, until stopped."""
+    roles.serve(live_handler(model), CALLS)
+
+
 if __name__ == "__main__":
-    run(chat_model(), VARIANT)
-    print("\n=== graph finished ===")
+    if os.environ.get("LIVE_ROLE"):
+        live(chat_model())
+    else:
+        run(chat_model(), VARIANT)
+        print("\n=== graph finished ===")

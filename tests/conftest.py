@@ -24,8 +24,24 @@ sys.path.insert(0, str(ROOT))
 CONTENT_SETTINGS = ("LANGSMITH_TRACING", "OPENINFERENCE_HIDE_")
 
 
+class ComposeLoader(yaml.SafeLoader):
+    """Reads compose.yaml's merge tags (!override, !reset) as plain values."""
+
+
+def _untagged(loader, node):
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node)
+    return loader.construct_scalar(node)
+
+
+ComposeLoader.add_constructor("!override", _untagged)
+ComposeLoader.add_constructor("!reset", _untagged)
+
+
 def shipped_settings() -> dict:
-    compose = yaml.safe_load((ROOT / "compose.yaml").read_text())
+    compose = yaml.load((ROOT / "compose.yaml").read_text(), Loader=ComposeLoader)
     environment = compose["services"]["agent"]["environment"]
     settings = {}
     for key, value in environment.items():
@@ -39,6 +55,8 @@ def shipped_settings() -> dict:
 os.environ.update(shipped_settings())
 os.environ.pop("LANGCHAIN_TRACING_V2", None)
 
+# No injected CRM errors: each test decides which calls fail (test_live_*).
+os.environ["CRM_ERROR_RATE"] = "0"
 import mock_services  # noqa: E402
 
 _crm = HTTPServer(("127.0.0.1", 0), mock_services.Handler)
