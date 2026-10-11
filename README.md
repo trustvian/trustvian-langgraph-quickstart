@@ -32,6 +32,8 @@ mock_services.py     fake CRM on 127.0.0.1:8081 (standard library, no dependenci
 tools.py             the agent's tools — imports NEITHER OTel NOR Trustvian
 graph.py             the agent as a StateGraph — imports NEITHER OTel NOR Trustvian
 run.py               instrumentation harness; runs graph.py unchanged
+live.py              live mode (step 8): starts and supervises three agents
+roles.py             live mode's roles, tickets and per-worker loop
 scenario.yaml        steps 3–5 as one repeatable scenario (step 6)
 tests/               the span checks; no model needed
 ```
@@ -229,6 +231,102 @@ has the procedure.
 - **The control plane outlives the run in step 5** (Terminal C), because a
   comparison needs one.
 
+## 8. Live mode: a fleet that keeps working
+
+Steps 3–6 are runs that end. Live mode is one that does not: three agents,
+each its own process and its own actor, work a ticket every few seconds until
+you stop them, so the live view fills continuously.
+
+| Actor (`service.name`) | Tools | Tickets (eight each, e.g.) |
+|---|---|---|
+| `support-agent` | `lookup_customer`, `send_reply` | "How do I reset my password?" |
+| `billing-agent` | `lookup_customer`, `lookup_invoice`, `issue_refund` | "I was charged twice this month." |
+| `accounts-agent` | `lookup_customer`, `change_plan` | "Please upgrade me to Pro." |
+
+`live.py` starts one worker per role, each `python run.py` with
+`OTEL_SERVICE_NAME=<role>-agent` and `LIVE_ROLE=<role>`; `graph.py` sees
+`LIVE_ROLE` and works that role's tickets with the same graph. Two things
+happen on purpose, and rarely:
+
+- **Drift.** Every 20th billing ticket also binds `export_customer` and asks
+  for an export: a new behavior on an actor Trustvian has already learned.
+- **Failed calls.** The fake CRM answers about 5% of requests with `503`
+  (`429` for refunds). The tool returns a short failure to the model, which
+  usually tries again.
+
+With the CRM from step 2 running (Terminal A) and step 3's exports:
+
+```bash
+trustvian dev --instrumentation existing \
+  --agent support-fleet --candidate live \
+  -- python live.py
+```
+
+`live.py` prints one line per ticket, never its text:
+
+```text
+live: 3 agents (support-agent, billing-agent, accounts-agent), one ticket each every ~10 s, until stopped (Ctrl-C)
+support-agent   ticket 1    tools: lookup_customer, send_reply  (6.2 s)
+billing-agent   ticket 20   tools: lookup_customer, lookup_invoice, export_customer, issue_refund  (4.0 s)  [drift]
+accounts-agent  ticket 21   tools: lookup_customer, change_plan  (2.3 s)  failed calls: 1
+```
+
+Stop it with **Ctrl-C**: `live.py` stops every worker (SIGTERM, SIGKILL after
+5 s), prints the tickets per agent and exits 0, and dev prints `Run
+dev-live-… complete.`
+
+What a 5½-minute run showed (Trustvian v0.11.0, `qwen2.5:3b` on an Apple M3
+Pro laptop, Ollama with `OLLAMA_NUM_PARALLEL=1`):
+
+- **One agent in the live view, three actors in the evidence.** The live
+  view's Agent, its Behavior flow and every Live stream row name the run's
+  agent, `support-fleet`. Which worker did what is in each observation's
+  `actor_id` (`support-agent`, `billing-agent`, `accounts-agent`), which
+  `GET /v1/evaluation-runs/<run>/observations` returns.
+- **A steady stream.** 76 tickets (26, 25 and 25), about 1,000 observations;
+  a ticket took 2–3.5 s at the median and 7 s at most, so the 10 s interval
+  keeps up even with the three workers queueing on one model.
+- **13 behaviors.** The rows every actor shares — the four `rpc/…` rows of
+  LangGraph itself, `external/qwen2.5:3b → ollama`, `http/GET` and
+  `http/POST → 127.0.0.1` — and six tools, each under the actor whose role
+  has it: `lookup_customer`, `send_reply`, `lookup_invoice`, `issue_refund`,
+  `change_plan`, and the drift's `export_customer`.
+- **The drift** appeared once, at billing ticket 20, about four minutes in:
+  `tool/export_customer`, NEW.
+- **Failed calls:** 13 HTTP observations with an error status, each the
+  `503` or `429` of one CRM request; the run went on.
+
+The knobs, all environment variables:
+
+| Variable | Default | |
+|---|---|---|
+| `LIVE_AGENTS` | `support,billing,accounts` | the roles to run |
+| `LIVE_INTERVAL_SECONDS` | `10` | one ticket per agent this often, ±50% jitter |
+| `LIVE_DRIFT_EVERY` | `20` | every Nth billing ticket also exports; `0` = never |
+| `LIVE_MAX_TICKETS` | `0` | tickets per agent, then stop; `0` = until stopped |
+| `CRM_ERROR_RATE` | `0.05` | share of CRM requests that fail; `0` = none. Read by `mock_services.py`, so set it in Terminal A |
+
+The three workers share one model server. Ollama serves
+`OLLAMA_NUM_PARALLEL` requests at a time and queues the rest; at `1`, as
+measured above, a ticket waits for the other agents' model calls, which is
+what the median includes. A slower model needs a longer
+`LIVE_INTERVAL_SECONDS`.
+
+With Docker Compose, live mode is a service of its own, attached to the
+stack's control plane:
+
+```bash
+docker compose --profile live up -d       # builds its image the first time
+# open http://127.0.0.1:8080/
+docker compose logs -f live               # the per-ticket lines
+docker compose --profile live down        # stops it; dev completes the run
+```
+
+`down` keeps the volumes, so the next `up` is scored against what this one
+taught; `down -v` forgets it. The knobs go in `.env`; `TRUSTVIAN_LIVE_AGENT`
+renames `support-fleet`. The `agent` service and its subcommands are
+unchanged.
+
 ## Other model servers
 
 `graph.py` uses `ChatOllama` by default, against `OLLAMA_HOST`
@@ -276,6 +374,12 @@ the reply text, the answer or the customer record. The one tool argument that
 does reach a span is the customer id, in the URL of the HTTP request
 `lookup_customer` makes. The hide settings the tests use are read from
 `compose.yaml`, so the tests and the stack cannot disagree.
+
+Live mode (step 8) has tests of its own: `live.py` with a stub worker (one
+worker per role with its `OTEL_SERVICE_NAME`, `LIVE_MAX_TICKETS`,
+`LIVE_DRIFT_EVERY`, a crashed worker restarted, nothing left running after
+SIGTERM), the CRM's new routes and seeded error rate, and each role's graph
+with the scripted model, under the same content checks.
 
 ## Running it with Docker Compose
 
