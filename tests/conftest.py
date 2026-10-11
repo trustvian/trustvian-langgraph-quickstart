@@ -39,6 +39,8 @@ def shipped_settings() -> dict:
 os.environ.update(shipped_settings())
 os.environ.pop("LANGCHAIN_TRACING_V2", None)
 
+# No injected CRM errors: each test decides which calls fail (test_live_*).
+os.environ["CRM_ERROR_RATE"] = "0"
 import mock_services  # noqa: E402
 
 _crm = HTTPServer(("127.0.0.1", 0), mock_services.Handler)
