@@ -17,10 +17,59 @@ Time: about 15 minutes for the first run (model download excluded).
 |---|---|
 | Ollama + a model | `ollama pull qwen2.5:3b` (1.9 GB). The model must support tool calling (`ollama show <model>` lists `tools`); gemma3 does not. To use vLLM or OpenAI instead, see [Other model servers](#other-model-servers). |
 | Python 3.11+ | `python3 --version` |
-| Trustvian v0.11.0 | **(a)** release archive: download the v0.11.0 macOS/Linux archive from the [release page](https://github.com/trustvian/trustvian/releases/tag/v0.11.0), extract it, add the directory to `PATH` — `trustvian`, `trustvian-local` and `trustvian-collector` ship side by side. **(b)** from a checkout: `git clone --branch v0.11.0 https://github.com/trustvian/trustvian && cd trustvian && make build dev-binaries && export PATH="$PWD/bin:$PATH"` |
-| Check | `trustvian version` prints `v0.11.0`; `trustvian dev --help` must work. |
+| Trustvian v0.12.0 | **(a)** release archive: download the v0.12.0 macOS/Linux archive from the [release page](https://github.com/trustvian/trustvian/releases/tag/v0.12.0), extract it, add the directory to `PATH` — `trustvian`, `trustvian-local` and `trustvian-collector` ship side by side. **(b)** from a checkout: `git clone --branch v0.12.0 https://github.com/trustvian/trustvian && cd trustvian && make build dev-binaries && export PATH="$PWD/bin:$PATH"` |
+| Check | `trustvian version` prints `v0.12.0`; `trustvian dev --help` must work. |
 
 `dev` does not run on Windows; use WSL2.
+
+### Upgrading from Trustvian v0.11.0
+
+**The platform database moves one way.** The first v0.12.0 `trustvian-local`
+to open a v0.11.0 state migrates it from schema 10 to 15, and v0.11.0 then
+refuses it:
+
+```text
+trustvian-local: opening platform database: platform: unsupported persistence schema: database reports version 15, this build supports 10
+```
+
+This project's state is `dev`'s directory, `~/.trustvian/dev/<hash>/` (the
+`State` line of the banner), live mode's `~/.trustvian/live/`, and under
+Compose the `trustvian-state` volume. Runs recorded before the upgrade are
+kept (a Compose volume from v0.11.0 still listed its runs after the first
+v0.12.0 start); what v0.12.0 adds to a record (frequency, fidelity, the
+recorded gate, provenance) reads *not recorded* for them. If the
+state matters, copy the stopped directory first; to start fresh instead,
+remove it (`rm -rf ~/.trustvian/dev/<hash>`). Under Compose, back the volume
+up with the stack stopped,
+
+```bash
+docker run --rm -v trustvian-langgraph-quickstart_trustvian-state:/state -v "$PWD":/backup \
+  alpine tar czf /backup/trustvian-state.tgz -C /state .
+```
+
+or start fresh with `docker compose down -v`. Rebuild every image, the live
+service's included: it is an image of its own, and `up` reuses an old one.
+
+```bash
+docker compose --profile agent --profile live build
+```
+
+**Upgrade the control plane before the CLI.** A v0.12.0 `trustvian eval run`
+sends fields an older control plane refuses, before any repetition starts:
+
+```text
+trustvian: invalid_request: request body is not valid JSON for this endpoint
+```
+
+`trustvian dev` starts a control plane of its own from the same directory, so
+only one started separately needs checking: Terminal C in step 5, live mode's
+in step 8, or any `TRUSTVIAN_API_URL`. `trustvian status` reads a route that
+v0.12.0 added; an older control plane answers it with `404`:
+
+```bash
+trustvian status --api-url http://127.0.0.1:8080 >/dev/null && echo "v0.12.0 or later"
+# against v0.11.0: trustvian: server returned HTTP 404   (exit 3)
+```
 
 ## 1. Project files
 
@@ -76,6 +125,7 @@ export OPENINFERENCE_HIDE_INPUTS=true          # keep prompt/output content out 
 export OPENINFERENCE_HIDE_OUTPUTS=true
 export OPENINFERENCE_HIDE_INPUT_MESSAGES=true  # and every chat message
 export OPENINFERENCE_HIDE_OUTPUT_MESSAGES=true
+export LLM_MODEL=qwen2.5:3b                    # graph.py's model; step 6 records it
 
 trustvian dev --instrumentation existing \
   --agent support-graph --candidate ref \
@@ -164,9 +214,10 @@ exit: 1
 
 The added behavior is the `export_customer` tool; `--json` lists it under
 `behavior_diff`. Run the same command with `--max-added-behaviors 1` and it
-passes. The Compare tab in the WebUI of Terminal C's control plane shows the
-same result; clicking a finding jumps to the observations that are its
-evidence.
+passes. In the WebUI of Terminal C's control plane, Compare is now part of
+**Change Impact**: below the scenario reports, mark one run **Reference** and
+the other **Candidate**, then **Compare runs** (Trustvian's `docs/webui.md`,
+"Comparing two runs").
 
 While Terminal C runs, `trustvian dev` refuses to start a second control plane
 on the same state (`a local control plane is already serving this state
@@ -186,25 +237,130 @@ trustvian eval run --scenario scenario.yaml
 echo "exit: $?"
 ```
 
-It needs the control plane from Terminal C, and Terminal B's exports. Expected:
+It needs the control plane from Terminal C, and Terminal B's exports. Three
+runs a side took 50 s here. Expected:
 
 ```text
+support-graph-export   runs 3   (execution scn-support-graph-export-20261013T173244-0c15d5f1)
+Recorded
+  reference: scenario sha256:afdaf6a0…   inputs not_declared   model qwen2.5:3b   prompt_ref not_recorded
+  candidate: scenario sha256:afdaf6a0…   inputs not_declared   model qwen2.5:3b   prompt_ref not_recorded
+
 Behavior                                  reference   candidate
-  ...
+  external/qwen2.5:3b → ollama                   3/3         3/3
+  …
   tool/export_customer                           0/3         3/3   + added
-  ...
+  rpc/agent                                      3/3         3/3
+
+Gate (k = 1, j = 0)
+  …
   FAIL repeatedly added behaviors: 1 (<= 0)
-...
+  …
+  PASS min candidate frequency: 3 (>= 3)
+  PASS max lost behaviors: 0 (<= 0)
+  PASS max llm calls per run: 5 (<= 18)
+
+Sameness
+  same_scenario    true
+  same_inputs      true
+  same_model       true
+  same_prompt_ref  not_recorded
+  …
 Gate: FAIL
 exit: 1
 ```
 
+What the scenario adds to step 5:
+
+- **The model is recorded.** Each side declares `model_env: LLM_MODEL`, the
+  variable `graph.py` reads, so the result says which model each side ran
+  and whether they were the same (`same_model`). Unset, it declares nothing
+  and reads `not_recorded`; that is why step 3 exports it. The prompt
+  reference is not declared, so `same_prompt_ref` is `not_recorded`.
+- **Three frequency limits**, each at a value the unchanged graph passes:
+  run against itself three times (`GRAPH_VARIANT=reference` on both sides),
+  it lost no behavior and kept every reference behavior in 3 of 3 candidate
+  runs, so `min_candidate_frequency: 3` and `max_lost_behaviors: 0`.
+  `max_llm_calls_per_run: 18` is the graph's own ceiling (two tickets of at
+  most nine model calls); the runs made 4 to 8. `scenario.yaml` says why
+  each value, and why there is no `max_calls_per_run`.
+
 The six repetitions are ordinary `trustvian dev` runs, each with a learning
-scope of its own; the scenarios page of the WebUI lists the execution.
-`--json` writes the result document. Before you trust a gate like this on a
-model-driven agent, measure how often the unchanged agent fails against
-itself: Trustvian's `docs/platform-cli.md` ("Calibrating `N`, `k` and `j`")
-has the procedure.
+scope of its own. Before you trust a gate like this on a model-driven agent,
+measure how often the unchanged agent fails against itself: Trustvian's
+`docs/platform-cli.md` ("Calibrating `N`, `k` and `j`") has the procedure.
+
+### Read it as a report
+
+Every completed execution keeps a report: the sameness, every behavior and
+target, tokens, the gate as it was recorded, and suggestions. Read it with
+the execution id `eval run` printed on its first line:
+
+```bash
+trustvian eval report scn-support-graph-export-20261013T173244-0c15d5f1 --json
+trustvian eval report scn-support-graph-export-20261013T173244-0c15d5f1 --format md
+```
+
+`--json` (and the default) is Trustvian's result document version 2, the
+same document `eval run --json` prints. In it, `comparison.counts` totals
+the behavior rows by classification:
+
+```json
+"counts": {"rows": "10", "added": "1", "removed": "0", "neither": "9", "not_recorded": "0", "lost": "0"}
+```
+
+and each behavior row carries the strings the tables show:
+
+```json
+"display": {
+  "reference_presence": "0/3",
+  "candidate_presence": "3/3",
+  "reference_calls_per_run": "0–0",
+  "candidate_calls_per_run": "2–3",
+  …
+}
+```
+
+`--format md` renders the same document as Markdown, one table per section,
+the Markdown Trustvian's CI renderer produces:
+
+```text
+### Trustvian behavioral gate — FAIL
+…
+| `service` · `tool` · `export_customer` · `local` | `e7528b283e002e05` | 0/3 | 3/3 | 0–0, mean 0 | 2–3, mean 2.333 | **+ added** | no | — | semantic · semantic 7 · transport 0 · unrecorded 0 |
+…
+| minimum candidate presence of reference behaviors | 3 | at least | 3 | pass | |
+| lost behaviors | 0 | at most | 0 | pass | |
+| calls per run | | | | not configured | |
+| model calls per run | 5 | at most | 18 | pass | |
+…
+- `compare.added_in_all_runs`: `tool/export_customer was added in 3/3 candidate runs. If this was expected, add it to the scenario; otherwise investigate before promoting.`
+```
+
+**There is no cost.** The tokens are counted, and the cost section says why
+there is no figure:
+
+```text
+| Input tokens | 9122 | 5978 | -3144 |
+…
+Cost: not available — no pricing table is configured (`pricing_not_configured`).
+```
+
+Trustvian ships no prices, and neither does this project. If you have real
+ones, `trustvian-local --pricing <file>` adds a cost with the table's version
+and source (Trustvian's `docs/local-development.md`, "Options").
+
+In the WebUI of Terminal C's control plane:
+
+- **Change Impact**, with the project chosen, lists its scenario executions;
+  choose one to read the same report, one table per section. The `R1`…`C3` beside a
+  behavior open that repetition's observations in Evidence.
+  `http://127.0.0.1:<port>/#execution=<execution id>` opens it directly.
+- **Overview**, with the project chosen, has a **Latest comparison** panel:
+  the newest execution's verdict, its added, removed and lost counts, the
+  four sameness answers and the first suggestion, with **Open in Change
+  Impact**. For the run above: `Verdict fail · Added 1 · Removed 0 · Lost 0`,
+  `Same scenario true · inputs true · model true · prompt not_recorded`.
 
 ## 7. What is different from the CrewAI quick start
 
@@ -315,30 +471,40 @@ state keeps the runs.
   your selection") while the other cards keep counting.
 - **Follow active** goes back to following the newest activity.
 
-What a 6-minute run showed (Trustvian v0.11.0, `qwen2.5:3b` on an Apple M3
-Pro laptop, Ollama with `OLLAMA_NUM_PARALLEL=1`):
+What a 14-minute run showed (Trustvian v0.12.0, `qwen2.5:3b` on an Apple M3
+Pro laptop, the Ollama app with its default settings):
 
 - **Three cards, one per agent**, and three runs, each `completed` after
-  Ctrl-C, which took under a second; no dev, Collector or agent was left
+  Ctrl-C, which took about a second; no dev, Collector or agent was left
   running.
-- **A steady stream.** 81 tickets (25, 26 and 30), about 1,100 observations;
-  a ticket took 1.8–3.4 s at the median and 7 s at most.
+- **A steady stream.** 192 tickets (61, 64 and 67), about 2,700
+  observations; a ticket took 2.9 s at the median and 30 s at most, while a
+  headless browser was reading the page on the same machine.
 - **Each agent's behaviors, in its own run:** the four `rpc/…` rows of
   LangGraph itself, `external/qwen2.5:3b → ollama`, `http/GET` and
   `http/POST → 127.0.0.1`, and the agent's tools: 9 for `support-agent` and
   `accounts-agent`, 11 for `billing-agent` (its three tools and the drift's
   `export_customer`).
-- **The drift** appeared once, at billing ticket 20, about 4½ minutes in, on
-  the `billing-agent` card: the view was following it, and the Inspector
-  opened `tool export_customer`, NEW.
-- **Failed calls:** 9, each the `503` or `429` of one CRM request (2 for
-  `support-agent`, 7 for `billing-agent`); the runs went on. A ticket still
-  in progress when Ctrl-C arrived ends with an error status on its graph and
-  model spans.
+- **The drift** came at billing tickets 20, 40 and 60.
+- **Failed calls:** 14, each the `503` or `429` of one CRM request (5 for
+  `support-agent`, 5 for `billing-agent`, 4 for `accounts-agent`); the runs
+  went on.
+- **Pinning held.** With the view following `billing-agent`, a click on
+  `support-agent` read "Pinned to your selection"; 20 s later it still
+  showed `support-agent` while the other cards kept counting, and **Follow
+  active** went back to "Following newest activity".
+- **Status shows one of the three.** Every dev's Collector reports to the
+  control plane as `dev`, and the control plane holds one report per name,
+  so `trustvian status` and the Status view show one agent's Collector at a
+  time, whichever reported last: six reads 5 s apart named `accounts-agent`
+  five times and `support-agent` once (under Compose, each of the three in
+  turn). Each count is that one Collector's (`"received": "60",
+  "evaluated": "60"`), not the fleet's.
 
-What the live view does not do at Trustvian v0.11.0:
+What the live view does not do at Trustvian v0.12.0:
 
 - **No pause.** The view keeps moving; to hold one agent still, pin its card.
+  (The **Stop** under "Watch one run" stops watching a run, not the view.)
 - **The canvas draws from the moment you select a run.** The stream keeps
   no history, so a pinned card's canvas fills as new observations arrive; a
   one-off such as the drift is drawn only if it arrives while that run is
@@ -358,9 +524,9 @@ The knobs, all environment variables:
 | `CRM_ERROR_RATE` | `0.05` | share of CRM requests that fail; `0` = none. Read by `mock_services.py`, so set it in Terminal A |
 
 The three agents share one model server. Ollama serves
-`OLLAMA_NUM_PARALLEL` requests at a time and queues the rest; at `1`, as
-measured above, a ticket waits for the other agents' model calls, which is
-what the median includes. A slower model needs a longer
+`OLLAMA_NUM_PARALLEL` requests at a time and queues the rest, so a ticket can
+wait for the other agents' model calls, and the median includes that wait.
+A slower model needs a longer
 `LIVE_INTERVAL_SECONDS`. Each role learns into its own baseline under
 `~/.trustvian/dev/`, kept between sessions, so the next session is scored
 against what this one taught.
@@ -370,7 +536,7 @@ one container, its three dev processes and three Collectors attached to the
 stack's control plane with `TRUSTVIAN_API_URL=http://control-plane:8080`:
 
 ```bash
-docker compose --profile live up -d       # builds its image the first time
+docker compose --profile live up -d       # builds its image the first time (after an upgrade: build it)
 # open http://127.0.0.1:8080/
 docker compose logs -f live               # the run ids and the per-ticket lines
 docker compose --profile live down        # stops it; every dev completes its run
@@ -474,10 +640,10 @@ docker compose up -d
 `docker compose up --build` never rebuilds it and a changed
 `requirements.txt` would not reach the image.
 
-The first build clones Trustvian (`TRUSTVIAN_REF`, default `v0.11.0`) and
+The first build clones Trustvian (`TRUSTVIAN_REF`, default `v0.12.0`) and
 compiles `trustvian` and `trustvian-local`; `trustvian-collector` is copied
 out of the signed release image
-`ghcr.io/trustvian/trustvian-collector:v0.11.0`, pinned by digest
+`ghcr.io/trustvian/trustvian-collector:v0.12.0`, pinned by digest
 (`TRUSTVIAN_COLLECTOR_IMAGE`). Then it installs LangGraph — a few minutes. To
 move to another release, change both values in `.env` together. The first `up` also pulls the model
 (`qwen2.5:3b`, 1.9 GB) into the `ollama` service; `docker compose logs -f
@@ -522,7 +688,8 @@ ref-… cand-…`. The gate limits come from `MAX_ADDED_BEHAVIORS`,
 with `-e`: `docker compose run --rm -e MAX_ADDED_BEHAVIORS=1 agent compare`.
 Expected result is the same as in the native flow: `Behaviors: +1 / …`,
 `FAIL Added behaviors: 1 (maximum 0)`, `Gate: FAIL`, exit 1, with
-`export_customer` as the added behavior; the Compare tab in the WebUI shows it.
+`export_customer` as the added behavior; Change Impact in the WebUI compares
+the two runs as well.
 
 Three things read differently from the native flow:
 
@@ -542,8 +709,30 @@ echo "exit: $?"
 
 The same scenario file, against the stack's control plane: `scenario.yaml`
 names the project, the agent and both candidates, so it needs no git
-checkout in the container. Expected: `tool/export_customer 0/3 3/3 + added`,
-`Gate: FAIL`, exit 1.
+checkout in the container, and the `agent` service sets `LLM_MODEL`, so the
+model is recorded. Expected, as measured (44 s): the HTTP rows read `→ crm`,
+then `tool/export_customer 0/3 3/3 + added`, `same_model true` with `model
+qwen2.5:3b` on both sides, `PASS max llm calls per run: 4 (<= 18)`, `Gate:
+FAIL`, exit 1.
+
+Then the report, with the execution id from the first line:
+
+```bash
+docker compose run --rm agent trustvian eval report scn-support-graph-export-<…> --json
+docker compose run --rm agent trustvian eval report scn-support-graph-export-<…> --format md
+```
+
+Its `comparison.counts` read `"rows": "10", "added": "1", "removed": "0",
+"neither": "9", "not_recorded": "0", "lost": "0"`, as natively, and Change
+Impact and Overview's Latest comparison show it at `http://127.0.0.1:8080/`.
+The report names its producers: the CLI and control plane here are built from
+v0.12.0's source rather than taken from the release archive, so they read
+
+```text
+Produced by `trustvian` `v0.0.0-20261013125534-23beffc7a85d 23beffc7a85db17cc22913769f6357953e88dfa0` and control plane `(devel) 23beffc7a85db17cc22913769f6357953e88dfa0`.
+```
+
+— the v0.12.0 commit, without the release's version string.
 
 ### Other commands
 
@@ -568,6 +757,7 @@ bind-mounted); changing `requirements.txt` does: `docker compose build agent`
 | `httpx.ConnectError` / `Connection refused` from the model | The model server is not reachable from the agent. Default stack: `docker compose ps ollama` and `docker compose logs ollama-pull`. Host Ollama: is the app running, and is `OLLAMA_URL` set? On Linux, `OLLAMA_HOST=0.0.0.0` |
 | `does not support tools` | The model has no tool calling (gemma3). Pick one whose `ollama show` lists `tools` |
 | WebUI shows the project but no behaviors | The run failed before the first model answer — `docker compose run --rm agent trustvian eval get --id <run id>` shows `failed`; fix the model, run again |
+| Live is empty | `docker compose run --rm agent trustvian status`, or the WebUI's **Status** view: which Collector reports to the control plane, what it received and evaluated, and suggestions naming what to check. No Collector at all while `live` runs: is its image current (`docker compose --profile live build live`)? A dev from before v0.12.0 starts a Collector that does not report status |
 | Build fails while fetching Go modules or cloning | Network/proxy on the build host; `TRUSTVIAN_REF` must be a branch, tag or full SHA that exists |
 | Build fails pulling `ghcr.io/trustvian/trustvian-collector` | Registry unreachable, or `TRUSTVIAN_COLLECTOR_IMAGE` names a digest that does not exist; `docker pull` it by hand to see the error |
 | `compare` says no run recorded | Run `reference` and `candidate` first, or pass the two ids explicitly |
@@ -581,7 +771,7 @@ bind-mounted); changing `requirements.txt` does: `docker compose build agent`
 | dev says "cannot determine which agent" | `--agent support-graph` is missing, or `OTEL_SERVICE_NAME` is unset |
 | dev says "a local control plane is already serving this state directory" | Terminal C from step 5 is still running; stop it, or pass the `--api-url` the message names |
 | `eval compare` / `eval run` says "no local runtime was found" | Start Terminal C (step 5), and run the command from this folder |
-| Live view is empty | Does `run.py` print "exporter → http://127.0.0.1:.../v1/traces" at startup? If not, `opentelemetry-exporter-otlp-proto-http` is not installed in the venv |
+| Live view is empty | Ask the pipeline: `trustvian status --api-url <the API line of dev's banner>` (or `$TRUSTVIAN_API_URL` in live mode) prints which Collector reports, the spans it received and evaluated, and each `service.name` it saw; its `suggestions` name what to check, for example `No Collector has reported in 30 s. Is 'trustvian dev' running, and is trustvian-collector on its path?`. The WebUI's **Status** view shows the same. `trustvian dev --check` tests the helpers with no workload: a reporting `dev-check` Collector and an empty `suggestions` list mean they work. A Collector that reports but has seen no producer points at the agent: does `run.py` print "exporter → http://127.0.0.1:.../v1/traces" at startup? If not, `opentelemetry-exporter-otlp-proto-http` is not installed in the venv |
 | No `tool/` rows, only HTTP | `openinference-instrumentation-langchain` is not installed or too old; check with `pip show` |
 | dev stops because of `OTEL_SDK_DISABLED=true` | Unset it. To silence LangChain's own tracer use `LANGSMITH_TRACING=false`, not that variable |
 | `=== c-1001: stopped after 17 steps ===` | The model kept calling tools; the run still completes and its behaviors are recorded. Try a larger model via `LLM_MODEL` |

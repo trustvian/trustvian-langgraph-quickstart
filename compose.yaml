@@ -33,7 +33,7 @@ services:
       context: .
       target: control-plane
       args:
-        TRUSTVIAN_REF: ${TRUSTVIAN_REF:-v0.11.0}
+        TRUSTVIAN_REF: ${TRUSTVIAN_REF:-v0.12.0}
     volumes:
       # Named, so `docker compose down` keeps runs and baselines and only
       # `docker compose down -v` discards them.
@@ -76,10 +76,10 @@ services:
       context: .
       target: agent
       args:
-        TRUSTVIAN_REF: ${TRUSTVIAN_REF:-v0.11.0}
+        TRUSTVIAN_REF: ${TRUSTVIAN_REF:-v0.12.0}
         # The Collector is the official release image, pinned by digest;
         # the Dockerfile copies its binary in beside the CLI.
-        TRUSTVIAN_COLLECTOR_IMAGE: ${TRUSTVIAN_COLLECTOR_IMAGE:-ghcr.io/trustvian/trustvian-collector:v0.11.0@sha256:643532142a8ebeabb7504fd4b591c77615a4495e0e5c478462b40f865113bddc}
+        TRUSTVIAN_COLLECTOR_IMAGE: ${TRUSTVIAN_COLLECTOR_IMAGE:-ghcr.io/trustvian/trustvian-collector:v0.12.0@sha256:65bb1b61d35b57b0a1efb9d237f71d0cc02e7b41d1cd30d4a58023c7d0a022f0}
     # Not started by `docker compose up`; only by `docker compose run agent …`.
     profiles: ["agent"]
     volumes:

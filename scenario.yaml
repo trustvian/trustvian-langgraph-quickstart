@@ -2,7 +2,7 @@
 #
 #   trustvian eval run --scenario scenario.yaml
 #
-# Every field below is one the scenario format of Trustvian v0.11.0 accepts;
+# Every field below is one the scenario format of Trustvian v0.12.0 accepts;
 # it refuses unknown fields, and `runs` and every gate limit are required.
 # The gate is step 5's (no added behavior, no block decision, no critical-risk
 # observation), counted over repetitions: a behavior is "added" when it is
@@ -16,13 +16,19 @@ runs: 3
 instrumentation: existing
 project: trustvian-langgraph-quickstart
 agent: support-graph
+# Each side declares the variable graph.py reads its model from, so the
+# comparison's sameness records the model (`model qwen2.5:3b`). An unset
+# variable declares nothing and reads not_recorded: export LLM_MODEL (step 3),
+# or keep Compose's, which sets it. No `inputs:`: the tickets are in graph.py.
 reference:
   candidate: ref
+  model_env: LLM_MODEL
   command: [python, run.py]
   env:
     GRAPH_VARIANT: reference
 candidate:
   candidate: cand
+  model_env: LLM_MODEL
   command: [python, run.py]
   env:
     GRAPH_VARIANT: candidate
@@ -32,3 +38,16 @@ gate:
   max_repeated_added_behaviors: 0
   max_block_decisions_per_run: 0
   max_critical_risk_observations_per_run: 0
+  # Frequency limits, at values the unchanged agent passes: three executions
+  # of the reference graph against itself (qwen2.5:3b, runs: 3, Trustvian
+  # v0.12.0) lost no behavior, and every reference behavior was in 3 of 3
+  # candidate runs.
+  min_candidate_frequency: 3                 # in every candidate run
+  max_lost_behaviors: 0
+  # Model calls: OpenInference names each one (an LLM span), so every run has
+  # the model-layer evidence this check needs. The same three executions made
+  # 6 to 8 a run. 18 is the graph's own ceiling, two tickets of at most nine
+  # model calls (graph.py stops a ticket after 17 steps); more means the
+  # graph changed. No max_calls_per_run: a per-target limit would be a second
+  # guess at the same loop.
+  max_llm_calls_per_run: 18
