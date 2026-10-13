@@ -17,8 +17,8 @@ Time: about 15 minutes for the first run (model download excluded).
 |---|---|
 | Ollama + a model | `ollama pull qwen2.5:3b` (1.9 GB). The model must support tool calling (`ollama show <model>` lists `tools`); gemma3 does not. To use vLLM or OpenAI instead, see [Other model servers](#other-model-servers). |
 | Python 3.11+ | `python3 --version` |
-| Trustvian v0.11.0 | **(a)** release archive: download the v0.11.0 macOS/Linux archive from the [release page](https://github.com/trustvian/trustvian/releases/tag/v0.11.0), extract it, add the directory to `PATH` — `trustvian`, `trustvian-local` and `trustvian-collector` ship side by side. **(b)** from a checkout: `git clone --branch v0.11.0 https://github.com/trustvian/trustvian && cd trustvian && make build dev-binaries && export PATH="$PWD/bin:$PATH"` |
-| Check | `trustvian version` prints `v0.11.0`; `trustvian dev --help` must work. |
+| Trustvian v0.12.0 | **(a)** release archive: download the v0.12.0 macOS/Linux archive from the [release page](https://github.com/trustvian/trustvian/releases/tag/v0.12.0), extract it, add the directory to `PATH` — `trustvian`, `trustvian-local` and `trustvian-collector` ship side by side. **(b)** from a checkout: `git clone --branch v0.12.0 https://github.com/trustvian/trustvian && cd trustvian && make build dev-binaries && export PATH="$PWD/bin:$PATH"` |
+| Check | `trustvian version` prints `v0.12.0`; `trustvian dev --help` must work. |
 
 `dev` does not run on Windows; use WSL2.
 
@@ -474,10 +474,10 @@ docker compose up -d
 `docker compose up --build` never rebuilds it and a changed
 `requirements.txt` would not reach the image.
 
-The first build clones Trustvian (`TRUSTVIAN_REF`, default `v0.11.0`) and
+The first build clones Trustvian (`TRUSTVIAN_REF`, default `v0.12.0`) and
 compiles `trustvian` and `trustvian-local`; `trustvian-collector` is copied
 out of the signed release image
-`ghcr.io/trustvian/trustvian-collector:v0.11.0`, pinned by digest
+`ghcr.io/trustvian/trustvian-collector:v0.12.0`, pinned by digest
 (`TRUSTVIAN_COLLECTOR_IMAGE`). Then it installs LangGraph — a few minutes. To
 move to another release, change both values in `.env` together. The first `up` also pulls the model
 (`qwen2.5:3b`, 1.9 GB) into the `ollama` service; `docker compose logs -f

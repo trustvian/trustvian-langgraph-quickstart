@@ -2,7 +2,7 @@
 #
 #   trustvian eval run --scenario scenario.yaml
 #
-# Every field below is one the scenario format of Trustvian v0.11.0 accepts;
+# Every field below is one the scenario format of Trustvian v0.12.0 accepts;
 # it refuses unknown fields, and `runs` and every gate limit are required.
 # The gate is step 5's (no added behavior, no block decision, no critical-risk
 # observation), counted over repetitions: a behavior is "added" when it is
